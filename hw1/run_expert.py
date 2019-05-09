@@ -16,6 +16,7 @@ import numpy as np
 import tf_util
 import gym
 import load_policy
+import time
 
 def main():
     import argparse
@@ -65,9 +66,13 @@ def main():
         print('returns', returns)
         print('mean return', np.mean(returns))
         print('std of return', np.std(returns))
+        print(actions)
 
         expert_data = {'observations': np.array(observations),
                        'actions': np.array(actions)}
+
+        if not os.path.isdir("expert_data"):
+            os.makedirs("expert_data")
 
         with open(os.path.join('expert_data', args.envname + '.pkl'), 'wb') as f:
             pickle.dump(expert_data, f, pickle.HIGHEST_PROTOCOL)
