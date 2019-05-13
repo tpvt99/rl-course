@@ -14,7 +14,7 @@ class MyModel(Model):
     def __init__(self):
         super(MyModel, self).__init__()
         self.d1 = Dense(64, activation='tanh')
-        self.d2 = Dense(64, activation='tanh')
+        self.d2 = Dense(32, activation='tanh')
         self.d3 = Dense(17)
 
     @tf.function
@@ -23,19 +23,35 @@ class MyModel(Model):
         x = self.d2(x)
         return self.d3(x)
 
+class Meter():
+    def __init__(self):
+        self.val = 0
+        self.count = 0
+        self.avg = 0
+        self.sum = 0
+
+    def update(self, val, count=1):
+        self.count += count
+        self.val = val
+        self.sum += val*count
+        self.avg = self.sum / self.count
+
 class BehaviorCloneing():
     def __init__(self, model, filename):
+        print(tf.executing_eagerly())
         self.ds = self.load_data(filename)
         self.model = model
         self.initialization()
+        print(tf.executing_eagerly())
 
     def start(self):
+        print(tf.executing_eagerly())
         template1 = "Epoch[{0} | {1}/{2}], Loss: {3:.3f} Accuracy: {4:.3f}"
-        for epoch in range(10):
+        for epoch in range(200):
             for index, data in enumerate(self.ds):
                 observations, actions = data
                 self.training(observations, actions)
-                print(template1.format((index+1)*10, epoch + 1, 10, self.train_loss.result(), self.train_accuracy.result()))
+                print(template1.format((index+1)*64, epoch + 1, 10, self.meter.avg, self.train_accuracy.result()))
 
             print("Saving the model")
             self.model.save_weights("bc_policy/bc_model", save_format="tf")
@@ -56,7 +72,7 @@ class BehaviorCloneing():
             for index, data in enumerate(self.ds):
                 observations, actions = data
                 self.training(observations, actions)
-                print(template1.format((index+1)*10, epoch + 1, 20, self.train_loss.result(), self.train_accuracy.result()))
+                print(template1.format((index+1)*64, epoch + 1, 20, self.train_loss.result(), self.train_accuracy.result()))
             self.model.save_weights("bc_policy/bc_model", save_format="tf")
 
     def initialization(self):
@@ -69,6 +85,7 @@ class BehaviorCloneing():
 
         self.test_loss = tf.keras.metrics.Mean(name='test_loss')
         self.test_accuracy = tf.keras.metrics.SparseCategoricalAccuracy(name='test_accuracy')
+        self.meter = Meter()
 
     def load_data(self, filename):
         with open(filename, "rb") as f:
@@ -82,19 +99,20 @@ class BehaviorCloneing():
         obs_std = np.sqrt(np.maximum(0, obs_meansq - np.square(obs_mean)))
         observations = (observations - obs_mean)/ (obs_std+ 1e-6)
         actions = actions.reshape(-1, 17)
-        ds = tf.data.Dataset.from_tensor_slices((observations, actions)).shuffle(20000).batch(32)
+
+        ds = tf.data.Dataset.from_tensor_slices((observations, actions)).shuffle(5000).batch(64)
         return ds
 
     def training(self, observations, actions):
-        @tf.function
         def train_step(inputs, outputs):
             with tf.GradientTape() as tape:
                 predictions = self.model(inputs)
                 loss = tf.reduce_mean(tf.nn.l2_loss(predictions-outputs))
             gradients = tape.gradient(loss, self.model.trainable_variables)
             self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-            self.train_loss(loss)
-            self.train_accuracy(tf.argmax(outputs, axis=1)[:,None], predictions)
+            #self.train_loss(loss)
+            self.meter.update(loss)
+            #self.train_accuracy(tf.argmax(outputs, axis=1)[:,None], predictions)
         train_step(observations, actions)
 
     def testing(self, observations, actions):
@@ -109,7 +127,8 @@ class BehaviorCloneing():
         test_step(observations, actions)
 
 if __name__ == "__main__":
+    print(tf.executing_eagerly())
     model = MyModel()
     bc = BehaviorCloneing(model, "expert_data/Humanoid-v2.pkl")
     # switch between bc.start() or bc.keep_training() to start training or keep training
-    bc.keep_training()
+    bc.start()

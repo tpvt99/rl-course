@@ -8,6 +8,7 @@ import numpy as np
 import time
 
 from behavior_cloning import MyModel
+from load_policy_v2 import ExpertPolicy
 
 
 def main():
@@ -40,19 +41,20 @@ def main():
 
     print("Built and loaded")
 
-    env = gym.make(args.env_name)
+    env = gym.make("Humanoid-v2")
     max_steps = args.max_timesteps or env.spec.timestep_limit
     returns = []
-
+    model = ExpertPolicy()
     for i in range(200):
         done = False
         totalr = 0
         obs = env.reset()
         #for z in range(1000):
         while not done:
-            action = model(obs[None])
+            action = model(obs[None,:].astype(np.float32))
             print(action)
             obs, r, done, _ = env.step(action)
+            print(obs)
             if args.render:
                 env.render()
             totalr += r
