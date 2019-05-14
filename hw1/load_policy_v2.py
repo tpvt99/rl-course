@@ -22,11 +22,11 @@ class CustomDenseLayer(tf.keras.layers.Layer):
             return tf.tanh(x)
 
 class ExpertPolicy(tf.keras.Model):
-    def __init__(self):
+    def __init__(self, env_filename = "experts/Humanoid-v2.pkl"):
         super(ExpertPolicy, self).__init__()
         self.policy_params = None
         self.layer_lists = []
-        self.initialization("experts/Humanoid-v2.pkl")
+        self.initialization(env_filename)
 
     def initialization(self, filename):
         with open(filename, 'rb') as f:

@@ -1,4 +1,7 @@
-import pickle, tensorflow as tf, tf_util, numpy as np
+import pickle, tf_util, numpy as np
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 def load_policy(filename):
     with open(filename, 'rb') as f:

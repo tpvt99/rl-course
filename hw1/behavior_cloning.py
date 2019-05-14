@@ -4,17 +4,22 @@ import numpy as np
 import gym
 import mujoco_py
 import pickle
+import time
 
 from tensorflow.keras import Model
 from tensorflow.keras.layers import Dense
-from tensorflow.python.util.tf_export import tf_export
+from load_policy_v2 import ExpertPolicy
 
+NUM_ROLLOUTS = 20
+ENV_NAME = "Humanoid-v2"
+MAX_STEPS = 1000
+BATCH_SIZE = 64
 
 class MyModel(Model):
     def __init__(self):
         super(MyModel, self).__init__()
-        self.d1 = Dense(64, activation='tanh')
-        self.d2 = Dense(32, activation='tanh')
+        self.d1 = Dense(128, activation=tf.nn.tanh)
+        self.d2 = Dense(64, activation=tf.nn.tanh)
         self.d3 = Dense(17)
 
     @tf.function
@@ -37,43 +42,44 @@ class Meter():
         self.avg = self.sum / self.count
 
 class BehaviorCloneing():
-    def __init__(self, model, filename):
-        print(tf.executing_eagerly())
-        self.ds = self.load_data(filename)
+    def __init__(self, model):
+        ## Constants
+        self.num_rollouts = NUM_ROLLOUTS
+        self.env_name = ENV_NAME
+        self.max_steps = MAX_STEPS
+        self.batch_size = BATCH_SIZE
+        ##
+        self.policy_fn = ExpertPolicy("experts/" + self.env_name + ".pkl")
+        self.ds = self.load_data("expert_data/" + self.env_name + ".pkl")
         self.model = model
         self.initialization()
-        print(tf.executing_eagerly())
 
     def start(self):
-        print(tf.executing_eagerly())
-        template1 = "Epoch[{0} | {1}/{2}], Loss: {3:.3f} Accuracy: {4:.3f}"
+        template = "Epoch[{0}/{1}], Loss: {2:.3f}"
         for epoch in range(200):
             for index, data in enumerate(self.ds):
                 observations, actions = data
                 self.training(observations, actions)
-                print(template1.format((index+1)*64, epoch + 1, 10, self.meter.avg, self.train_accuracy.result()))
+            print(template.format(epoch + 1, 200, self.meter.avg))
 
-            print("Saving the model")
-            self.model.save_weights("bc_policy/bc_model", save_format="tf")
-
-    @staticmethod
-    @tf_export("loss_hihi")
-    def loss(inputs, outputs):
-        return tf.reduce_mean(tf.nn.l2_loss(inputs-outputs))
+        print("Saving the model")
+        self.model.save_weights("bc_policy/bc_model", save_format="tf")
 
     def keep_training(self):
-        template1 = "Epoch[{0} | {1}/{2}], Loss: {3:.3f} Accuracy: {4:.3f}"
+        template = "Epoch[{0}/{1}], Loss: {2:.3f}"
         for obs, data in self.ds:
-            model.apply(obs[None,0])
+            self.model.apply(obs[None,0])
             break
-        model.load_weights("bc_policy/bc_model")
+        print("Load weight")
 
-        for epoch in range(20):
+        self.model.load_weights("bc_policy/bc_model")
+
+        for epoch in range(200):
             for index, data in enumerate(self.ds):
                 observations, actions = data
                 self.training(observations, actions)
-                print(template1.format((index+1)*64, epoch + 1, 20, self.train_loss.result(), self.train_accuracy.result()))
-            self.model.save_weights("bc_policy/bc_model", save_format="tf")
+            print(template.format(epoch + 1, 200, self.meter.avg))
+        self.model.save_weights("bc_policy/bc_model", save_format="tf")
 
     def initialization(self):
 
@@ -88,47 +94,136 @@ class BehaviorCloneing():
         self.meter = Meter()
 
     def load_data(self, filename):
-        with open(filename, "rb") as f:
-            data = pickle.loads(f.read())
-            observations = data['observations'].astype(np.float32)
-            actions = data['actions'].astype(np.float32)
+        flag = True
+        try:
+            with open(filename, "rb") as f:
+                data = pickle.loads(f.read())
+                observations = data['observations'].astype(np.float32)
+                actions = data['actions'].astype(np.float32)
+                if observations.shape[0] != (self.num_rollouts * self.max_steps):
+                    flag = False
+        except FileNotFoundError:
+            flag = False
+
+        if flag == True:
+            print("Expert data is generated. Done")
+            observations = observations.reshape(-1, observations.shape[-1])
+            actions = actions.reshape(-1, actions.shape[-1])
+            ds = tf.data.Dataset.from_tensor_slices((observations, actions)).shuffle(observations.shape[0]).batch(self.batch_size)
+            return ds
+        else:
+            print("Generating new expert data")
+            env = gym.make(self.env_name)
+
+            returns = []
+            observations = []
+            actions = []
+
+            for i in range(self.num_rollouts):
+                print('iter', i)
+                obs = env.reset()
+                done = False
+                totalr = 0.
+                steps = 0
+                while not done:
+                    action = self.policy_fn(obs[None, :].astype(np.float32))
+                    observations.append(obs)
+                    actions.append(action)
+                    obs, r, done, _ = env.step(action)
+                    totalr += r
+                    steps += 1
+                    env.render()
+                    if steps % 100 == 0: print("%i/%i" % (steps, self.max_steps))
+                    if steps >= self.max_steps:
+                        break
+                returns.append(totalr)
+
+            print('returns', returns)
+            print('mean return', np.mean(returns))
+            print('std of return', np.std(returns))
+
+            expert_data = {'observations': np.array(observations),
+                           'actions': np.array(actions)}
+
+            if not os.path.isdir("expert_data"):
+                os.makedirs("expert_data")
+
+            with open(os.path.join('expert_data', self.env_name + '.pkl'), 'wb') as f:
+                pickle.dump(expert_data, f, pickle.HIGHEST_PROTOCOL)
+
+            observations = np.array(observations).astype(np.float32)
+            actions = np.array(actions).astype(np.float32)
+
+            observations = observations.reshape(-1, observations.shape[-1])
+            actions = actions.reshape(-1, actions.shape[-1])
+
+            ds = tf.data.Dataset.from_tensor_slices((observations, actions)).shuffle(observations.shape[0]).batch(self.batch_size)
+            return ds
 
         # normalizing data
-        obs_mean = np.mean(observations, axis = 0)
-        obs_meansq = np.mean(np.square(observations), axis = 0)
-        obs_std = np.sqrt(np.maximum(0, obs_meansq - np.square(obs_mean)))
-        observations = (observations - obs_mean)/ (obs_std+ 1e-6)
-        actions = actions.reshape(-1, 17)
-
-        ds = tf.data.Dataset.from_tensor_slices((observations, actions)).shuffle(5000).batch(64)
-        return ds
+        #obs_mean = np.mean(observations, axis = 0)
+        #obs_meansq = np.mean(np.square(observations), axis = 0)
+        #obs_std = np.sqrt(np.maximum(0, obs_meansq - np.square(obs_mean)))
+        #observations = (observations - obs_mean)/ (obs_std+ 1e-6)
+        #actions = actions.reshape(-1, 17)
 
     def training(self, observations, actions):
-        def train_step(inputs, outputs):
-            with tf.GradientTape() as tape:
-                predictions = self.model(inputs)
-                loss = tf.reduce_mean(tf.nn.l2_loss(predictions-outputs))
-            gradients = tape.gradient(loss, self.model.trainable_variables)
-            self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
-            #self.train_loss(loss)
-            self.meter.update(loss)
-            #self.train_accuracy(tf.argmax(outputs, axis=1)[:,None], predictions)
-        train_step(observations, actions)
+        with tf.GradientTape() as tape:
+            predictions = self.model(observations)
+            loss = tf.reduce_mean(tf.nn.l2_loss(predictions-actions))
+            self.meter.update(loss.numpy())
+        gradients = tape.gradient(loss, self.model.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.model.trainable_variables))
 
-    def testing(self, observations, actions):
-        @tf.function
-        def test_step(inputs, outputs):
-            predictions = self.model(inputs)
-            loss = self.loss_object(outputs, predictions)
 
-            self.test_loss(loss)
-            self.test_accuracy(outputs, predictions)
 
-        test_step(observations, actions)
+def test():
+    returns = []
+    env_name = ENV_NAME
+
+    env = gym.make(env_name)
+    model = MyModel()
+
+    print("Loading and building policy of " + env_name)
+    with open("expert_data/" + env_name + ".pkl", "rb") as f:
+        data = pickle.loads(f.read())
+        observations = data['observations'].astype(np.float32)
+        actions = data['actions'].astype(np.float32)
+        print(actions.shape)
+
+    # obs_mean = np.mean(observations, axis=0)
+    # obs_meansq = np.mean(np.square(observations), axis=0)
+    # obs_std = np.sqrt(np.maximum(0, obs_meansq - np.square(obs_mean)))
+    # observations = (observations - obs_mean) / (obs_std + 1e-6)
+
+    model.apply(observations[:1])
+    model.load_weights("bc_policy/bc_model")
+
+    print("Built and loaded")
+    max_steps = MAX_STEPS
+    returns = []
+    for _ in range(100):
+        done = False
+        totalr = 0
+        obs = env.reset()
+        step = 0
+        # for z in range(1000):
+        while not done:
+            action = model(obs[None, :].astype(np.float32))
+            obs, r, done, _ = env.step(action)
+            env.render()
+            totalr += r
+            step += 1
+            if step % 100 == 0: print("Iter {} / {}".format(step, max_steps))
+            if step >= max_steps: break
+        returns.append(totalr)
+
+    print('returns', returns)
+    print('mean return', np.mean(returns))
+    print('std of return', np.std(returns))
 
 if __name__ == "__main__":
-    print(tf.executing_eagerly())
     model = MyModel()
-    bc = BehaviorCloneing(model, "expert_data/Humanoid-v2.pkl")
-    # switch between bc.start() or bc.keep_training() to start training or keep training
-    bc.start()
+    bc = BehaviorCloneing(model)
+    bc.keep_training()
+    test()
