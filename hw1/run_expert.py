@@ -11,12 +11,15 @@ Author of this script and included expert policies: Jonathan Ho (hoj@openai.com)
 
 import os
 import pickle
-import tensorflow as tf
+#import tensorflow as tf
 import numpy as np
 import tf_util
 import gym
 import load_policy
 import time
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 def main():
     import argparse

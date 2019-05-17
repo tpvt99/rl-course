@@ -1,10 +1,13 @@
 import numpy as np
-import tensorflow as tf # pylint: ignore-module
+
 #import builtins
 import functools
 import copy
 import os
 import collections
+
+import tensorflow.compat.v1 as tf
+tf.disable_v2_behavior()
 
 # ================================================================
 # Import all names into common namespace
