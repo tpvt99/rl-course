@@ -490,7 +490,7 @@ class Agent():
             with tf.GradientTape() as tape:
                 predictions = self.policy_forward_pass(ob_no)
                 loss1 = self.get_log_prob(predictions, ac_na) # (batch_size,)
-                loss2 = -tf.reduce_mean(tf.multiply(loss1, adv_n))
+                loss2 = tf.reduce_mean(tf.multiply(loss1, adv_n))
             gradients = tape.gradient(loss2, self.model.trainable_variables)
             self.update_op.apply_gradients(zip(gradients, self.model.trainable_variables))
         else:

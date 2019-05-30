@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import json
 import os
+from matplotlib.legend import DraggableLegend
 
 """
 Using the plotter:
@@ -50,11 +51,11 @@ the --legend flag and then provide a title for each logdir.
 
 def plot_data(data, value="AverageReturn"):
     if isinstance(data, list):
-        data = pd.concat(data, ignore_index=True)
+        data = pd.concat(data, ignore_index=True, sort = True)
 
     sns.set(style="darkgrid", font_scale=1.5)
     sns.tsplot(data=data, time="Iteration", value=value, unit="Unit", condition="Condition")
-    plt.legend(loc='best').draggable()
+    legend = plt.legend(loc='best')
     plt.show()
 
 
